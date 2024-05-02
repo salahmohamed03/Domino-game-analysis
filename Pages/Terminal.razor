@@ -1,0 +1,440 @@
+﻿@page "/Terminal"
+@using MauiApp1.Services
+@using System.Text
+@inject GameService game
+<div class="body">
+    <div class="screen" style="position: relative;">
+        <div style="position: sticky; top: 0;background-color:#1e1e1e; color:white;">
+            <p style="margin:0;">&nbsp;@((MarkupString)Highlight($"mode:{game.mode}", (shift && !game.settings.canNavigatePieces) ? "white" : "gray")) &nbsp; 
+                @((MarkupString)Highlight($"player:{game.settings.playerNames[(int)game.turn]}", (!shift && game.settings.canNavigate) ? "white" : "gray"))
+            </p>
+            <hr style="margin:0;" />
+        </div>
+        
+        <div class="content">
+            @((MarkupString)content)
+        </div>
+    </div>
+    <div class="controls">
+        <button class="oi oi-arrow-thick-left left" @onclick="Previous"></button>
+        <button class="oi oi-arrow-thick-right right" @onclick="Next"></button>
+        <button class="mode" @onclick="Shift">Shift</button>
+        <button class="invoke" disabled="@(!game.settings.canAdvance)" @onclick="UpdateGame">Advance</button>
+    </div>
+    <div class="pieces">
+        @for(int i = 0 ;i < 28; i++)
+        {
+            int index = i;
+            <img src="/images/@($"{i+1}").jpg" @onclick="@(() => SelectPiece(index))" class="@GetPieceStatus(index)" alt="">
+        }
+    </div>
+</div>
+@code{
+    private List<bool> IsSelected = Enumerable.Repeat(false, 28).ToList();
+    private string content;
+    private int? clickedPiece = null;
+    private int? closedPiece = null;
+    private bool shift = false;
+    protected override void OnInitialized()
+    {
+        game.mode = Mode.start;
+        Update();
+    }
+    private void Shift()
+    {
+        if (!game.settings.canShift || game.settings.canNavigatePieces) return;
+        shift = !shift;
+        Update();
+    }
+    private void Update()
+    {
+        switch (game.mode)
+        {
+            case Mode.start:
+                game.settings.canAdvance = false;
+                game.settings.canSelect = true;
+                game.settings.canNavigate = false;
+                game.settings.canNavigatePieces = false;
+                game.settings.canShift = false;
+                shift = false;
+                var selected = GetSelctedPieces();
+                Show($"Select your Pieces! ({7 - selected.Count} left)");
+                break;
+            case Mode.firstMove:
+                game.settings.canAdvance = false;
+                game.settings.canSelect = true;
+                game.settings.canNavigate = true;
+                game.settings.canNavigatePieces = false;
+                game.settings.canShift = false;
+                shift = false;
+                UnSelectAll();
+                Show($"Select the piece that {Highlight(game.settings.playerNames[(int)game.turn])} will start with");
+                break;
+            case Mode.mainStream:
+                game.settings.canAdvance = true;
+                game.settings.canSelect = true;
+                game.settings.canNavigate = false;
+                game.settings.canNavigatePieces = false;
+                game.settings.canShift = true;
+                game.turn = game.prvTurn;
+                UnSelectAll(false);
+                clickedPiece = null;
+                Show($"{Highlight(game.settings.playerNames[(int)game.turn])} turn.");
+                break;
+            case Mode.possiblePieces:
+                game.settings.canAdvance = false;
+                game.settings.canSelect = false;
+                game.settings.canNavigate = true;
+                game.settings.canNavigatePieces = false;
+                game.settings.canShift = true;
+                UnSelectAll();
+                ShowPossiblePieces(game.turn);
+                break;
+            case Mode.possibleMoves:
+                game.settings.canAdvance = false;
+                game.settings.canSelect = false;
+                game.settings.canNavigate = true;
+                game.settings.canNavigatePieces = false;
+                game.settings.canShift = true;
+                UnSelectAll();
+                ShowPossibleMoves(game.turn);
+                break;
+        }
+        if (IsEndGame())
+        {
+            var score = game.CalculateScore();
+            Show($"Game Over!<br />Score : {score}");
+            game.settings.canAdvance = false;
+            game.settings.canSelect = false;
+            game.settings.canNavigatePieces = false;
+            game.settings.canNavigate = false;
+            return;
+        }
+    }
+    private void ShowPossiblePieces(Player player)
+    {
+        var possibleMoves = game.possiblePieces[game.turn].Item1;
+        var table = game.ConvertToDict(possibleMoves);
+        content = game.ShowTableTranspose(table);
+        var Pieces = game.PossiblePieces(game.turn);
+        Pieces.ForEach(x => SelectPiece(x.Item1, x.Item2, false));
+    }
+    private void ShowPossibleMoves(Player player)
+    {
+        var lastMove = game.moves.LastOrDefault();
+        if (lastMove is null) return;
+        var possibleMoves = game.CanPlay(player,lastMove.leftOpen,lastMove.opened);
+        var table = game.ConvertToDict(possibleMoves);
+        content = game.ShowTableTranspose(table);
+        var Pieces = possibleMoves.Select(x => x.piece).ToList();
+        Pieces.ForEach(x => SelectPiece(x.Item1, x.Item2, false));
+    }
+    private void Next()
+    {
+        if(!shift)
+        {
+            if (game.settings.canNavigate)
+            {
+                game.Next();
+                Update();
+                return;
+            }
+        }
+        else if(!game.settings.canNavigatePieces)
+        {
+            game.NextMode();
+            Update();
+            return;
+        }
+        if (game.settings.canNavigatePieces)
+        {
+            var piece = GetFromIndex((int)clickedPiece);
+            var lastMove = new Tuple<int, int>(game.moves.Last().opened, game.moves.Last().leftOpen);
+            if (!PiecesMatchs(lastMove.Item2, piece))
+                return;
+            closedPiece = lastMove.Item2;
+            Show($"Close {Highlight(lastMove.Item1.ToString(), "black")} or {Highlight(lastMove.Item2.ToString())} ?");
+        }
+    }
+    private void Previous()
+    {
+        if (!shift)
+        {
+            if (game.settings.canNavigate)
+            {
+                game.Previous();
+                Update();
+                return;
+            }
+        }
+        else if (!game.settings.canNavigatePieces)
+        {
+            game.PreviousMode();
+            Update();
+            return;
+        }
+        if (game.settings.canNavigatePieces)
+        {
+            var piece = GetFromIndex((int)clickedPiece);
+            var lastMove = new Tuple<int, int>(game.moves.Last().opened, game.moves.Last().leftOpen);
+            if (!PiecesMatchs(lastMove.Item1, piece))
+                return;
+            closedPiece = lastMove.Item1;
+            Show($"Close {Highlight(lastMove.Item1.ToString())} or {Highlight(lastMove.Item2.ToString(), "black")} ?");
+        }
+    }
+    private void SelectPiece(int index)
+    {
+        switch (game.mode)
+        {
+            case Mode.start:
+                SetYourPieces(index);
+                break;
+            case Mode.firstMove:
+                SetFirstMove(index);
+                break;
+            case Mode.mainStream:
+                SetMove(index);
+                break;
+        }
+
+    }
+    private void SetYourPieces(int index)
+    {
+        var selected = GetSelctedPieces();
+        var selectedCount = selected.Count;
+        if(IsSelected[index])
+        {
+            selectedCount--;
+            IsSelected[index] = !IsSelected[index];
+            Show($"Select your Pieces! ({7-selectedCount} left)");
+        }
+        else if (!IsSelected[index] && selected.Count < 7)
+        {
+            selectedCount++;
+            IsSelected[index] = !IsSelected[index];
+            Show($"Select your Pieces! ({7-selectedCount} left)");
+        }
+        if(selectedCount == 7)
+        {
+            game.settings.canAdvance = true;
+        }
+        else
+        {
+            game.settings.canAdvance = false;
+        }
+    }
+    private void SetFirstMove(int index)
+    {
+        var selected = GetSelctedPieces();
+        if (IsSelected[index])
+        {
+            IsSelected[index] = !IsSelected[index];
+            Show($"Select the piece that<span style=\"color:red\"> {game.settings.playerNames[(int)game.turn]}</span> will start with");
+            game.settings.canAdvance = false;
+        }
+        else if (!IsSelected[index] && selected.Count == 0)
+        {
+            var piece = GetFromIndex(index);
+            if (!game.PossiblePieces(game.turn).Contains(piece))
+                return;
+            IsSelected[index] = !IsSelected[index];
+            Show($"<span style=\"color:red\"> {game.settings.playerNames[(int)game.turn]}</span> will play " +
+            $"[{piece.Item1}|{piece.Item2}]!");
+            game.settings.canAdvance = true;
+        }
+    }
+    private void SetMove(int index)
+    {
+        if (IsSelected[index])
+        {
+            var piece = GetFromIndex(index);
+            if (game.IsOnTheGround(piece.Item1, piece.Item2))
+                return;
+            IsSelected[index] = !IsSelected[index];
+            Show($"<span style=\"color:red\"> {game.settings.playerNames[(int)game.turn]}</span> turn.");
+            game.settings.canNavigatePieces = false;
+            clickedPiece = null;
+        }
+        else if (!IsSelected[index] && game.moves.Count == GetSelctedPieces().Count)
+        {
+            var piece = GetFromIndex(index);
+            if (!game.PossiblePieces(game.turn).Contains(piece))
+                return;
+            if (game.IsOnTheGround(piece.Item1, piece.Item2))
+                return;
+            IsSelected[index] = !IsSelected[index];
+            var lastMove = new Tuple<int, int>(game.moves.Last().opened, game.moves.Last().leftOpen);
+            if (PiecesMatchs(lastMove.Item1, piece))
+            {
+                closedPiece = lastMove.Item1;
+                Show($"Close {Highlight(lastMove.Item1.ToString())} or {Highlight(lastMove.Item2.ToString(), "black")} ?");
+            }
+            else if (PiecesMatchs(lastMove.Item2, piece))
+            {
+                closedPiece = lastMove.Item2;
+                Show($"Close {Highlight(lastMove.Item1.ToString(), "black")} or {Highlight(lastMove.Item2.ToString())} ?");
+            }
+            else
+            {
+                UnSelectAll(false);
+                return;
+            }
+            clickedPiece = index;
+            game.settings.canNavigatePieces = true;
+        }
+    }
+    private void UpdateGame()
+    {
+        shift = true;
+        if(game.mode == Mode.start)
+        {
+            game.mode = Mode.firstMove;
+            game.InitializePossiblePieces(GetSelctedPieces());
+            UnSelectAll();
+        }
+        else if(game.mode == Mode.firstMove)
+        {
+            game.mode = Mode.mainStream;
+            var selected = GetSelctedPieces();
+            var piece = selected.First();
+            var firstMove = new Move()
+            {
+                player = game.turn,
+                min = piece.Item1,
+                max = piece.Item2,
+                opened = piece.Item1,
+                closed = -1,
+                leftOpen = piece.Item2
+            };
+            game.moves.Add(firstMove);
+            var possiblePieces = game.possiblePieces[game.turn];
+            possiblePieces = (possiblePieces.Item1, possiblePieces.Item2 - 1);
+            game.possiblePieces[game.turn] = possiblePieces;
+            game.PiecePlayed(firstMove.Piece());
+            game.Next();
+            game.prvTurn = game.turn;
+        }
+        else if(game.mode == Mode.mainStream)
+        {
+            if(clickedPiece != null)
+            {
+                var lastMove = game.moves.Last();
+                var piece = GetFromIndex((int)clickedPiece);
+                var move = new Move()
+                {
+                    player = game.turn,
+                    min = piece.Item1,
+                    max = piece.Item2,
+                    opened = (piece.Item2 == (int)closedPiece) ? piece.Item1 : piece.Item2,
+                    closed = (int)closedPiece,
+                    leftOpen = (lastMove.leftOpen != (int)closedPiece) ? lastMove.leftOpen : lastMove.opened
+                };
+                game.moves.Add(move);
+                var possiblePieces = game.possiblePieces[game.turn];
+                possiblePieces = (possiblePieces.Item1, possiblePieces.Item2 - 1);
+                game.possiblePieces[game.turn] = possiblePieces;
+                game.PiecePlayed(move.Piece());
+            }
+            else
+            {
+                var lastMove = game.moves.Last();
+                var certain = game.CertainPieces(game.turn)
+                .Intersect(game.CouldBePlayed(lastMove.leftOpen,lastMove.opened))
+                .ToList();
+                if(certain.Count != 0)
+                {
+                    Show("You have to play !");
+                    return;
+                }
+                game.RemovePieces(game.turn , lastMove.leftOpen);
+                game.RemovePieces(game.turn , lastMove.opened);
+            }
+            game.Next();
+            game.prvTurn = game.turn;
+        }
+        Update();
+    }
+    private bool IsEndGame()
+    {
+        // player finished his pieces
+        foreach(var player in game.possiblePieces.Keys)
+        {
+            if (game.possiblePieces[player].Item2 == 0)
+            {
+                return true;
+            }
+        }
+        // no more moves
+        var remaining = game.RemainingMoves();
+        var lastMove = game.moves?.LastOrDefault();
+        if (lastMove == null)
+            return false;
+        var lastPiece = new Tuple<int, int>(lastMove.opened, lastMove.leftOpen);
+        foreach(var move in remaining)
+        {
+            if(PiecesMatchs(move.Item1,lastPiece)||PiecesMatchs(move.Item2,lastPiece))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+
+    //UI components
+    private void SelectPiece(int a, int b,bool ModeRules = true)
+    {
+        int min = Math.Min(a, b);
+        int max = Math.Max(a, b);
+        int index = game.Pieces[new Tuple<int, int>(min, max)];
+        if (min < 0 || max > 6)
+            return;
+        if(ModeRules)
+            SelectPiece(index);
+        else
+        {
+            IsSelected[index] = true;
+        }
+
+    }
+    private string GetPieceStatus(int index)
+    {
+        return IsSelected[index] ? "selected" : "NotSelected";
+    }
+    private List<Tuple<int,int>> GetSelctedPieces()
+    {
+        var selected = new List<Tuple<int, int>>();
+        for (int i = 0;i < 28;i++)
+        {
+            if (IsSelected[i])
+                selected.Add(GetFromIndex(i));
+        }
+        return selected;
+    }
+    private Tuple<int,int> GetFromIndex(int index)
+    {
+        return game.Pieces.First(p => p.Value == index).Key;
+    }
+    private void Show(string text){
+        content = game.Show(text);
+    }
+    private void UnSelectAll(bool onTheGround = true)
+    {
+        IsSelected = Enumerable.Repeat(false, 28).ToList();
+        if (!onTheGround)
+            SelectONTheGround();
+    }
+    private void SelectONTheGround()
+    {
+        game.moves.ForEach(m => SelectPiece(m.Piece().Item1, m.Piece().Item2, false));
+    }
+    private string Highlight(string s, string color = "red"){
+        return $"<span style=\"color:{color}\">{s}</span>";
+    }
+    private bool PiecesMatchs(int p1, Tuple<int,int> p2)
+    {
+        return p1 == p2.Item1 || p1 == p2.Item2;
+    }
+
+}

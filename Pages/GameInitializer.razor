@@ -1,0 +1,59 @@
+﻿@page "/gameinitializer"
+@inject NavigationManager Nav
+@using MauiApp1.Services
+@using Data
+@inject  GameService game
+<h1 style="padding:0;margin:0;"></h1>
+<div class="body">
+	<form class="settings" @onsubmit="StartGame">
+        <div class="type">
+            <label for="gameType">Game Type:</label>
+            <select id="gameType" @bind="gameType" @onselect="refresh">
+                <option value="4">2 v 2</option>
+                <option value="2">1 v 1</option>
+            </select>
+        </div>
+		<dvi class="players">
+			@for(int i = 0; i < 4; i++)
+			{
+				int index = i;
+				<div class="player" style="display:@((index+1 > NumberOfPlayers())? "none":"");">
+					<label for="playerName">Player @(i+1)</label>
+					<input type="text" @bind="playerNames[index]"  maxlength="13"/>
+				</div>
+			}
+		</dvi>
+
+		<button type="submit" class="start" >Start</button>
+	</form>
+</div>
+@code {
+	private string gameType = "4";
+	private List<string> playerNames = Enumerable.Repeat("player", 4).ToList();
+	protected override void OnInitialized()
+	{
+		for (int i = 0; i < 4; i++)
+		{
+			playerNames[i] = $"player{i+1}";
+		}
+	}
+	private int NumberOfPlayers()
+	{
+		return int.Parse(gameType);
+	}
+	private void refresh()
+	{
+		
+		this.StateHasChanged();
+	}
+	private void StartGame()
+	{
+		var settings = new Settings()
+		{
+			playerNames = playerNames,
+			gameType = gameType
+		};
+	    game.SetSettings(settings);
+        Nav.NavigateTo("Terminal");
+    }
+}
